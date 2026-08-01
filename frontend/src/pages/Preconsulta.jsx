@@ -1,0 +1,316 @@
+import React, { useState, useEffect } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { LayoutGrid, UserPlus, FolderOpen, Shield, Plus, Search, Bell, HelpCircle, LogOut, Loader2, CheckCircle2, AlertCircle, HeartPulse, Thermometer, Activity, Wind, Droplets, Weight, Ruler, Calculator, Flag, AlertTriangle } from "lucide-react";
+import { api } from "../services/api";
+import { filtrarNav } from "../services/permisos";
+
+const navItems = [
+  { label: "Panel de Control", icon: LayoutGrid, path: "/" },
+  { label: "Registro de Pacientes", icon: UserPlus, path: "/registro" },
+  { label: "Expedientes Clínicos", icon: FolderOpen, path: "/expedientes" },
+  { label: "Control de Acceso", icon: Shield, path: "/admin" },
+];
+
+const VITAL_RANGES = {
+  presion_sistolica: { min: 90, max: 140, label: "Presión Sistólica", unit: "mmHg", icon: HeartPulse, color: "#e53e3e" },
+  presion_diastolica: { min: 60, max: 90, label: "Presión Diastólica", unit: "mmHg", icon: HeartPulse, color: "#e53e3e" },
+  frecuencia_cardiaca: { min: 60, max: 100, label: "Frecuencia Cardíaca", unit: "lpm", icon: Activity, color: "#dd6b20" },
+  temperatura: { min: 35.5, max: 37.5, label: "Temperatura", unit: "°C", icon: Thermometer, color: "#f6ad55", step: 0.1 },
+  frecuencia_respiratoria: { min: 12, max: 20, label: "Freq. Respiratoria", unit: "rpm", icon: Wind, color: "#38b2ac" },
+  saturacion_oxigeno: { min: 95, max: 100, label: "Saturación O₂", unit: "%", icon: Droplets, color: "#3182ce" },
+  peso: { min: 0, max: 300, label: "Peso", unit: "kg", icon: Weight, color: "#805ad5", step: 0.1 },
+  talla: { min: 0, max: 2.5, label: "Talla", unit: "m", icon: Ruler, color: "#d69e2e", step: 0.01 },
+};
+
+export default function Preconsulta() {
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const id_visita = searchParams.get("id_visita");
+  const id_paciente = searchParams.get("id_paciente");
+
+  const [paciente, setPaciente] = useState(null);
+  const [visita, setVisita] = useState(null);
+  const [form, setForm] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [imc, setImc] = useState(null);
+  const [alertas, setAlertas] = useState([]);
+  const [feedback, setFeedback] = useState({ type: "", msg: "" });
+  const [preconsultaExistente, setPreconsultaExistente] = useState(null);
+
+  const user = JSON.parse(localStorage.getItem("auth") || "{}");
+  const nav = filtrarNav(user.rol, navItems);
+
+  const handleLogout = () => {
+    localStorage.removeItem("auth");
+    navigate("/login");
+  };
+
+  const fetchData = async () => {
+    if (!id_visita && !id_paciente) {
+      setLoading(false);
+      return;
+    }
+    try {
+      if (id_visita) {
+        try {
+          const v = await api.getVisita(id_visita);
+          setVisita(v);
+          setPaciente({
+            id_paciente: v.id_paciente,
+            nombre_completo: v.nombre_completo,
+            dpi: v.dpi,
+            edad: v.edad,
+            sexo: v.sexo,
+          });
+        } catch (e) {
+          console.error(e);
+        }
+        try {
+          const pre = await api.getPreconsulta(id_visita);
+          setPreconsultaExistente(pre);
+          Object.keys(pre).forEach(k => {
+            if (pre[k] !== null && pre[k] !== undefined) setForm(f => ({ ...f, [k]: pre[k] }));
+          });
+        } catch (e) {}
+      }
+      if (id_paciente) {
+        const exp = await api.getExpediente(id_paciente);
+        setPaciente(exp.paciente);
+        const visitaHoy = exp.visitas.find(v => v.id_visita == id_visita) || exp.visitas[0];
+        if (visitaHoy) setVisita(visitaHoy);
+      }
+      calculateIMC();
+      checkAlertas();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { fetchData(); }, [id_visita, id_paciente]);
+
+  const calculateIMC = () => {
+    if (form.peso && form.talla && form.talla > 0) {
+      const val = (form.peso / (form.talla * form.talla)).toFixed(2);
+      setImc(val);
+    } else {
+      setImc(null);
+    }
+  };
+
+  const checkAlertas = () => {
+    const nuevas = [];
+    Object.entries(VITAL_RANGES).forEach(([key, range]) => {
+      const val = parseFloat(form[key]);
+      if (!isNaN(val)) {
+        if (val < range.min || val > range.max) {
+          nuevas.push({ ...range, key, value: val, type: val < range.min ? "bajo" : "alto" });
+        }
+      }
+    });
+    setAlertas(nuevas);
+  };
+
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+    setForm(f => ({ ...f, [name]: value }));
+    if (name === "peso" || name === "talla") calculateIMC();
+    setTimeout(checkAlertas, 100);
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!user.id) {
+      setFeedback({ type: "err", msg: "Falta usuario" });
+      return;
+    }
+    setSaving(true);
+    setFeedback({ type: "", msg: "" });
+    try {
+      let visitaId = id_visita ? parseInt(id_visita) : null;
+      if (!visitaId) {
+        if (!paciente?.id_paciente) {
+          setFeedback({ type: "err", msg: "No se encontró el paciente de la visita" });
+          setSaving(false);
+          return;
+        }
+        const visita = await api.crearVisita({
+          id_paciente: paciente.id_paciente,
+          motivo_consulta: null,
+          id_usuario_registro: user.id,
+        });
+        visitaId = visita.id_visita;
+      }
+      const data = { ...form, id_visita: visitaId, id_usuario_registro: user.id };
+      delete data.imc;
+      await api.registrarPreconsulta(data);
+      setFeedback({ type: "ok", msg: "Preconsulta guardada. Estado: EN TRIAJE" });
+      setPreconsultaExistente(data);
+      if (!id_visita) navigate(`/preconsulta?id_visita=${visitaId}`, { replace: true });
+    } catch (err) {
+      setFeedback({ type: "err", msg: err.message });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const goToConsulta = () => {
+    if (id_visita) navigate(`/consulta?id_visita=${id_visita}`);
+  };
+
+  if (loading) return <div className="flex h-screen items-center justify-center"><Loader2 size={32} className="animate-spin text-[#005eb8]" /></div>;
+  if (!paciente && !visita) return <div className="flex h-screen items-center justify-center text-[#ba1a1a]">Visita o paciente no especificado</div>;
+
+  const VitalInput = ({ key, range }) => {
+    const val = form[key];
+    const alerta = alertas.find(a => a.key === key);
+    const isOut = !!alerta;
+    return (
+      <div className={`relative ${isOut ? "ring-2 ring-[#ba1a1a]" : ""}`}>
+        <label className="block text-sm font-semibold mb-1 flex items-center gap-1.5">
+          <range.icon size={14} className={isOut ? "text-[#ba1a1a]" : "text-[#005eb8]"} />
+          {range.label}
+          {isOut && <Flag size={12} className="text-[#ba1a1a]" title={alerta.type === "bajo" ? `Bajo (mín: ${range.min})` : `Alto (máx: ${range.max})`} />}
+        </label>
+        <input
+          name={key}
+          type="number"
+          step={range.step || 1}
+          value={val || ""}
+          onChange={handleChange}
+          placeholder={range.min > 0 ? `${range.min}-${range.max}` : ""}
+          className={`w-full border rounded-lg px-3 py-2.5 focus:outline-none focus:border-[#005eb8] focus:ring-2 focus:ring-[#005eb8]/20 transition-all ${isOut ? "border-[#ba1a1a] bg-[#fff5f5]" : "border-[#c2c6d4]"}`}
+        />
+        <span className="absolute right-3 top-8 text-xs text-[#424752]">{range.unit}</span>
+      </div>
+    );
+  };
+
+  return (
+    <div className="flex h-screen bg-[#f7f9fb] font-sans text-[#191c1e] overflow-hidden">
+      <aside className="w-[255px] h-full flex-shrink-0 bg-white border-r border-[#c2c6d4] flex flex-col justify-between">
+        <div className="p-4 overflow-y-auto">
+          <div className="flex items-center gap-3 pb-6">
+            <div className="w-9 h-9 rounded-md bg-[#006a71] text-white flex items-center justify-center">
+              <HeartPulse size={20} />
+            </div>
+            <div>
+              <div className="font-bold text-[16px] text-[#00478d]">CMP Zaculeu</div>
+              <div className="text-xs text-[#424752]">Preconsulta / Triaje</div>
+            </div>
+          </div>
+          <nav className="flex flex-col gap-1">
+            {nav.map(({ label, icon: Icon, path }) => (
+              <div key={label} onClick={() => navigate(path)} className="flex items-center gap-2.5 px-3 py-2.5 rounded-md font-semibold text-sm cursor-pointer text-[#424752] hover:bg-[#f2f4f6]">
+                <Icon size={18} />
+                {label}
+              </div>
+            ))}
+          </nav>
+        </div>
+        <div className="p-4 border-t border-[#c2c6d4] flex flex-col gap-3 shrink-0">
+          <div onClick={handleLogout} className="flex items-center gap-2 px-3 py-2 text-sm text-[#424752] hover:bg-[#f2f4f6] rounded-md cursor-pointer transition-colors">
+            <LogOut size={16} /> Cerrar Sesión
+          </div>
+        </div>
+      </aside>
+
+      <div className="flex-1 flex flex-col h-full overflow-y-auto">
+        <header className="h-20 shrink-0 bg-white border-b border-[#c2c6d4] flex items-center justify-between px-8 sticky top-0 z-10">
+          <div className="font-bold text-xl text-[#00478d]">Preconsulta - Signos Vitales</div>
+          <div className="flex items-center gap-4">
+            <div className="text-right">
+              <div className="font-bold text-sm text-[#00478d]">{user.nombre || "Enfermería"}</div>
+              <div className="text-xs text-[#424752] capitalize">{user.rol || "enfermera"}</div>
+            </div>
+            <div className="w-9 h-9 rounded-full bg-[#d0e1fb] border border-[#c2c6d4] flex items-center justify-center font-bold text-[#00478d] text-sm">
+              {(user.nombre || "E")[0]}
+            </div>
+          </div>
+        </header>
+
+        <main className="flex-1 p-8 max-w-4xl mx-auto w-full">
+          <div className="bg-white border border-[#c2c6d4] border-l-4 border-l-[#006a71] rounded-lg p-5 mb-6">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-full bg-[#dceeee] flex items-center justify-center text-xl">🧑</div>
+              <div>
+                <div className="font-bold text-xl">{paciente?.nombre_completo || "Paciente no cargado"}</div>
+                <div className="flex gap-4 mt-1 text-sm text-[#424752]">
+                  <span>DPI: {paciente?.dpi || "—"}</span>
+                  <span>Edad: {paciente?.edad || "—"} años</span>
+                  <span>Sexo: {paciente?.sexo === "M" ? "Masculino" : "Femenino"}</span>
+                  {visita && <span className={`px-2 py-0.5 rounded text-xs font-semibold ${visita.estado === "pendiente" ? "bg-[#ffdad6] text-[#ba1a1a]" : visita.estado === "en_triaje" ? "bg-[#c7f0f4] text-[#006a71]" : "bg-[#d0e1fb] text-[#00478d]"}`}>{visita.estado.replace("_", " ").toUpperCase()}</span>}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {feedback.msg && (
+            <div className={`flex items-center gap-3 p-4 rounded-lg mb-6 font-semibold border-l-4 ${feedback.type === "ok" ? "bg-[#dceeee] text-[#006a71] border-[#006a71]" : "bg-[#ffdad6] text-[#ba1a1a] border-[#ba1a1a]"}`}>
+              {feedback.type === "ok" ? <CheckCircle2 size={18} /> : <AlertCircle size={18} />}
+              {feedback.msg}
+            </div>
+          )}
+
+          {alertas.length > 0 && (
+            <div className="bg-[#fff5f5] border-l-4 border-[#ba1a1a] p-4 rounded-r-lg mb-6">
+              <div className="flex items-center gap-2 text-[#ba1a1a] font-semibold mb-2">
+                <AlertTriangle size={18} /> ALERTAS DE SIGNOS VITALES
+              </div>
+              <ul className="space-y-1">
+                {alertas.map(a => (
+                  <li key={a.key} className="text-sm flex items-center gap-2">
+                    <Flag size={14} className="text-[#ba1a1a]" />
+                    <span>{a.label}: <strong>{a.value} {a.unit}</strong> ({a.type === "bajo" ? `mín ${a.min}` : `máx ${a.max}`})</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit} className="bg-white border border-[#c2c6d4] rounded-xl p-6 shadow-sm space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+              {Object.entries(VITAL_RANGES).map(([key, range]) => (
+                <VitalInput key={key} range={range} />
+              ))}
+            </div>
+
+            {imc && (
+              <div className="bg-[#f0fff4] border border-[#9ae6b4] rounded-lg p-4 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <Calculator size={24} className="text-[#276749]" />
+                  <div>
+                    <div className="text-xs text-[#276749] font-semibold">IMC CALCULADO</div>
+                    <div className="font-bold text-2xl text-[#276749]">{imc}</div>
+                  </div>
+                </div>
+                <div className="text-right text-sm text-[#276749]">
+                  {imc < 18.5 && "Bajo peso"}
+                  {imc >= 18.5 && imc < 25 && "Normal"}
+                  {imc >= 25 && imc < 30 && "Sobrepeso"}
+                  {imc >= 30 && "Obesidad"}
+                </div>
+              </div>
+            )}
+
+            <div className="flex justify-end gap-3 pt-4 border-t border-[#eceef0]">
+              <button type="button" onClick={() => navigate(-1)} className="px-6 py-2.5 border border-[#c2c6d4] rounded-lg font-semibold text-[#424752] hover:bg-[#f2f4f6] transition-colors">
+                Volver
+              </button>
+              <button type="submit" disabled={saving} className="px-6 py-2.5 bg-[#006a71] hover:bg-[#004d56] text-white rounded-lg font-bold transition-all disabled:opacity-60 flex items-center gap-2">
+                {saving ? <><Loader2 size={16} className="animate-spin" /> Guardando...</> : "Guardar Preconsulta"}
+              </button>
+              {preconsultaExistente && (
+                <button type="button" onClick={goToConsulta} className="px-6 py-2.5 bg-[#005eb8] hover:bg-[#00478d] text-white rounded-lg font-bold transition-all flex items-center gap-2">
+                  <HeartPulse size={16} /> Ir a Consulta Médica
+                </button>
+              )}
+            </div>
+          </form>
+        </main>
+      </div>
+    </div>
+  );
+}
