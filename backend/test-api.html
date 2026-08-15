@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Test API - Backend Preconsulta</title>
+<style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+    body { background: #0f172a; color: #e2e8f0; padding: 20px; }
+    h1 { text-align: center; margin-bottom: 6px; color: #f1f5f9; }
+    .subtitle { text-align: center; color: #94a3b8; margin-bottom: 24px; font-size: 14px; }
+    .subtitle code { background: #1e293b; padding: 2px 6px; border-radius: 4px; color: #7dd3fc; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 16px; }
+    .card { background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 16px; }
+    .card-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+    .method { font-weight: 700; padding: 4px 10px; border-radius: 6px; font-size: 12px; color: #fff; }
+    .m-GET { background: #22c55e; }
+    .m-POST { background: #3b82f6; }
+    .m-DELETE { background: #ef4444; }
+    .m-PUT { background: #f59e0b; }
+    .endpoint { font-family: monospace; font-size: 12px; color: #cbd5e1; word-break: break-all; }
+    .card-body { display: flex; flex-direction: column; gap: 10px; }
+    label { font-size: 12px; color: #94a3b8; }
+    input[type=text], input[type=number], textarea {
+        width: 100%; background: #0f172a; border: 1px solid #334155; border-radius: 6px;
+        color: #e2e8f0; padding: 8px; font-size: 13px; font-family: monospace;
+    }
+    textarea { resize: vertical; min-height: 80px; }
+    .row { display: flex; gap: 8px; align-items: flex-end; }
+    .row > div { flex: 1; }
+    button.run {
+        background: #334155; color: #e2e8f0; border: none; padding: 8px 14px;
+        border-radius: 6px; font-weight: 600; cursor: pointer; font-size: 13px;
+        transition: background .2s; white-space: nowrap;
+    }
+    button.run:hover { background: #475569; }
+    .output { background: #0f172a; border: 1px solid #334155; border-radius: 6px; padding: 10px; font-family: monospace; font-size: 12px; min-height: 50px; max-height: 220px; overflow: auto; white-space: pre-wrap; word-break: break-word; color: #7dd3fc; }
+    .output.error { color: #f87171; }
+    .status { font-size: 11px; margin-left: auto; color: #94a3b8; }
+    .status.ok { color: #22c55e; }
+    .status.bad { color: #ef4444; }
+</style>
+</head>
+<body>
+<h1>🔧 Test API Backend</h1>
+<p class="subtitle">Servidor base: <code id="base-url">http://localhost:5000</code></p>
+
+<div class="grid">
+
+    <!-- AUTH -->
+    <div class="card">
+        <div class="card-header"><span class="method m-POST">POST</span><span class="endpoint">/api/auth/login</span></div>
+        <div class="card-body">
+            <div><label>Body (JSON)</label><textarea data-body='{"username":"DOC","password":"Doctor1234"}'>{"username":"DOC","password":"Doctor1234"}</textarea></div>
+            <button class="run" data-method="POST" data-url="/api/auth/login">Ejecutar</button>
+            <div class="output" data-output></div>
+        </div>
+    </div>
+
+    <!-- VISITAS HOY -->
+    <div class="card">
+        <div class="card-header"><span class="method m-GET">GET</span><span class="endpoint">/api/visitas/hoy</span></div>
+        <div class="card-body">
+            <button class="run" data-method="GET" data-url="/api/visitas/hoy">Ejecutar</button>
+            <div class="output" data-output></div>
+        </div>
+    </div>
+
+    <!-- ESTADISTICAS -->
+    <div class="card">
+        <div class="card-header"><span class="method m-GET">GET</span><span class="endpoint">/api/visitas/estadisticas</span></div>
+        <div class="card-body">
+            <button class="run" data-method="GET" data-url="/api/visitas/estadisticas">Ejecutar</button>
+            <div class="output" data-output></div>
+        </div>
+    </div>
+
+    <!-- PACIENTES LIST -->
+    <div class="card">
+        <div class="card-header"><span class="method m-GET">GET</span><span class="endpoint">/api/patients</span></div>
+        <div class="card-body">
+            <button class="run" data-method="GET" data-url="/api/patients">Ejecutar</button>
+            <div class="output" data-output></div>
+        </div>
+    </div>
+
+    <!-- PACIENTES CREATE -->
+    <div class="card">
+        <div class="card-header"><span class="method m-POST">POST</span><span class="endpoint">/api/patients</span></div>
+        <div class="card-body">
+            <div><label>Body (JSON)</label><textarea data-body='{"nombre_completo":"Juan Pérez","dpi":"1234567890101","fecha_nacimiento":"1985-05-10","sexo":"M","telefono":"55512345","direccion":"Zaculeu, Hue.","id_usuario_registro":1}'>{"nombre_completo":"Juan Pérez","dpi":"1234567890101","fecha_nacimiento":"1985-05-10","sexo":"M","telefono":"55512345","direccion":"Zaculeu, Hue.","id_usuario_registro":1}</textarea></div>
+            <button class="run" data-method="POST" data-url="/api/patients">Ejecutar</button>
+            <div class="output" data-output></div>
+        </div>
+    </div>
+
+    <!-- EXPEDIENTE -->
+    <div class="card">
+        <div class="card-header"><span class="method m-GET">GET</span><span class="endpoint">/api/expediente/:id</span></div>
+        <div class="card-body">
+            <div><label>ID del paciente</label><input type="number" data-param value="1"></div>
+            <button class="run" data-method="GET" data-url="/api/expediente/">Ejecutar</button>
+            <div class="output" data-output></div>
+        </div>
+    </div>
+
+    <!-- USUARIOS LIST -->
+    <div class="card">
+        <div class="card-header"><span class="method m-GET">GET</span><span class="endpoint">/api/usuarios</span></div>
+        <div class="card-body">
+            <button class="run" data-method="GET" data-url="/api/usuarios">Ejecutar</button>
+            <div class="output" data-output></div>
+        </div>
+    </div>
+
+    <!-- USUARIOS CREATE -->
+    <div class="card">
+        <div class="card-header"><span class="method m-POST">POST</span><span class="endpoint">/api/usuarios</span></div>
+        <div class="card-body">
+            <div><label>Body (JSON)</label><textarea data-body='{"nombre_completo":"Dr. Test","nombre_usuario":"test","contrasena":"Test1234","id_rol":3}'>{"nombre_completo":"Dr. Test","nombre_usuario":"test","contrasena":"Test1234","id_rol":3}</textarea></div>
+            <button class="run" data-method="POST" data-url="/api/usuarios">Ejecutar</button>
+            <div class="output" data-output></div>
+        </div>
+    </div>
+
+    <!-- USUARIOS DELETE -->
+    <div class="card">
+        <div class="card-header"><span class="method m-DELETE">DELETE</span><span class="endpoint">/api/usuarios/:id</span></div>
+        <div class="card-body">
+            <div><label>ID del usuario</label><input type="number" data-param value="1"></div>
+            <button class="run" data-method="DELETE" data-url="/api/usuarios/">Ejecutar</button>
+            <div class="output" data-output></div>
+        </div>
+    </div>
+
+    <!-- AVISOS -->
+    <div class="card">
+        <div class="card-header"><span class="method m-GET">GET</span><span class="endpoint">/api/avisos</span></div>
+        <div class="card-body">
+            <button class="run" data-method="GET" data-url="/api/avisos">Ejecutar</button>
+            <div class="output" data-output></div>
+        </div>
+    </div>
+
+    <!-- ROLES -->
+    <div class="card">
+        <div class="card-header"><span class="method m-GET">GET</span><span class="endpoint">/api/roles</span></div>
+        <div class="card-body">
+            <button class="run" data-method="GET" data-url="/api/roles">Ejecutar</button>
+            <div class="output" data-output></div>
+        </div>
+    </div>
+
+    <!-- VISITAS CREATE -->
+    <div class="card">
+        <div class="card-header"><span class="method m-POST">POST</span><span class="endpoint">/api/visitas</span></div>
+        <div class="card-body">
+            <div><label>Body (JSON)</label><textarea data-body='{"id_paciente":1,"motivo_consulta":"Dolor de cabeza","id_usuario_registro":4}'>{"id_paciente":1,"motivo_consulta":"Dolor de cabeza","id_usuario_registro":4}</textarea></div>
+            <button class="run" data-method="POST" data-url="/api/visitas">Ejecutar</button>
+            <div class="output" data-output></div>
+        </div>
+    </div>
+
+    <!-- VISITA GET -->
+    <div class="card">
+        <div class="card-header"><span class="method m-GET">GET</span><span class="endpoint">/api/visitas/:id</span></div>
+        <div class="card-body">
+            <div><label>ID de la visita</label><input type="number" data-param value="1"></div>
+            <button class="run" data-method="GET" data-url="/api/visitas/">Ejecutar</button>
+            <div class="output" data-output></div>
+        </div>
+    </div>
+
+    <!-- PRECONSULTA -->
+    <div class="card">
+        <div class="card-header"><span class="method m-POST">POST</span><span class="endpoint">/api/preconsulta</span></div>
+        <div class="card-body">
+            <div><label>Body (JSON)</label><textarea data-body='{"id_visita":1,"presion_sistolica":120,"presion_diastolica":80,"frecuencia_cardiaca":72,"temperatura":36.5,"frecuencia_respiratoria":16,"saturacion_oxigeno":98,"peso":70,"talla":1.70,"id_usuario_registro":4}'>{"id_visita":1,"presion_sistolica":120,"presion_diastolica":80,"frecuencia_cardiaca":72,"temperatura":36.5,"frecuencia_respiratoria":16,"saturacion_oxigeno":98,"peso":70,"talla":1.70,"id_usuario_registro":4}</textarea></div>
+            <button class="run" data-method="POST" data-url="/api/preconsulta">Ejecutar</button>
+            <div class="output" data-output></div>
+        </div>
+    </div>
+
+    <!-- CONSULTA MEDICA -->
+    <div class="card">
+        <div class="card-header"><span class="method m-POST">POST</span><span class="endpoint">/api/consulta_medica</span></div>
+        <div class="card-body">
+            <div><label>Body (JSON)</label><textarea data-body='{"id_visita":1,"diagnostico":"Migraña","indicaciones":"Paracetamol 500mg c/8h por 3 días","observaciones":"Reposo","fecha_seguimiento":"2026-08-08","id_medico":3}'>{"id_visita":1,"diagnostico":"Migraña","indicaciones":"Paracetamol 500mg c/8h por 3 días","observaciones":"Reposo","fecha_seguimiento":"2026-08-08","id_medico":3}</textarea></div>
+            <button class="run" data-method="POST" data-url="/api/consulta_medica">Ejecutar</button>
+            <div class="output" data-output></div>
+        </div>
+    </div>
+
+    <!-- PRECONSULTA GET -->
+    <div class="card">
+        <div class="card-header"><span class="method m-GET">GET</span><span class="endpoint">/api/preconsulta/:id_visita</span></div>
+        <div class="card-body">
+            <div><label>ID de la visita</label><input type="number" data-param value="1"></div>
+            <button class="run" data-method="GET" data-url="/api/preconsulta/">Ejecutar</button>
+            <div class="output" data-output></div>
+        </div>
+    </div>
+
+    <!-- CONSULTA MEDICA GET -->
+    <div class="card">
+        <div class="card-header"><span class="method m-GET">GET</span><span class="endpoint">/api/consulta_medica/:id_visita</span></div>
+        <div class="card-body">
+            <div><label>ID de la visita</label><input type="number" data-param value="1"></div>
+            <button class="run" data-method="GET" data-url="/api/consulta_medica/">Ejecutar</button>
+            <div class="output" data-output></div>
+        </div>
+    </div>
+
+</div>
+
+<script>
+    const base = document.getElementById('base-url').textContent;
+
+    document.querySelectorAll('button.run').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const card = btn.closest('.card');
+            const output = card.querySelector('[data-output]');
+            const method = btn.dataset.method;
+            let url = base + btn.dataset.url;
+
+            const paramInput = card.querySelector('[data-param]');
+            if (paramInput) url += paramInput.value;
+
+            const bodyTextarea = card.querySelector('[data-body]');
+            let body = null;
+            if (bodyTextarea && bodyTextarea.value.trim() !== '') {
+                body = bodyTextarea.value;
+            }
+
+            output.textContent = 'Cargando...';
+            output.classList.remove('error');
+
+            try {
+                const res = await fetch(url, {
+                    method,
+                    headers: body ? { 'Content-Type': 'application/json' } : {},
+                    body
+                });
+                const text = await res.text();
+                let pretty;
+                try { pretty = JSON.stringify(JSON.parse(text), null, 2); }
+                catch { pretty = text; }
+
+                const status = document.createElement('div');
+                status.className = 'status ' + (res.ok ? 'ok' : 'bad');
+                status.textContent = res.status + ' ' + res.statusText;
+
+                const prevStatus = output.querySelector('.status');
+                output.innerHTML = '';
+                output.appendChild(status);
+                output.appendChild(document.createTextNode('\n' + pretty));
+                if (!res.ok) output.classList.add('error');
+            } catch (err) {
+                output.textContent = 'Error: ' + err.message + '\n¿Está el backend corriendo en ' + base + '?';
+                output.classList.add('error');
+            }
+        });
+    });
+</script>
+</body>
+</html>

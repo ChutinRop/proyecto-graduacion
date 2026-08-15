@@ -139,7 +139,7 @@ app.get('/api/patients', async (req, res) => {
 app.post('/api/patients', async (req, res) => {
     const { nombre_completo, dpi, fecha_nacimiento, sexo, telefono, direccion, id_usuario_registro } = req.body;
     if (!nombre_completo || !fecha_nacimiento || !sexo) {
-        return res.status(400).json({ error: 'Faltan campos obligatorios: nombre, fecha de nacimiento y sexo' });
+        return res.status(400).json({ error: 'Faltan campos obligatorios: nombre_completo, fecha_nacimiento y sexo' });
     }
     try {
         const { rows } = await pool.query(
@@ -159,6 +159,60 @@ app.post('/api/patients', async (req, res) => {
             return res.status(409).json({ error: 'Ya existe un paciente con ese DPI' });
         }
         res.status(500).json({ error: 'Error al registrar paciente' });
+    }
+});
+
+// Elimina un expediente y todo su historial asociado (visitas, preconsultas,
+// consultas, prescripciones y dispensaciones) en una sola transacción.
+app.delete('/api/patients/:id', async (req, res) => {
+    const { id } = req.params;
+    const id_usuario_editor = req.body?.id_usuario_editor || 1;
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        const { rows } = await client.query(
+            'SELECT nombre_completo FROM paciente WHERE id_paciente = $1', [id]
+        );
+        if (rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ error: 'Paciente no encontrado' });
+        }
+        await client.query(`
+            DELETE FROM dispensacion
+            WHERE id_prescripcion IN (
+                SELECT p.id_prescripcion FROM prescripcion p
+                INNER JOIN consulta_medica cm ON p.id_consulta = cm.id_consulta
+                INNER JOIN visita v ON cm.id_visita = v.id_visita
+                WHERE v.id_paciente = $1
+            )`, [id]);
+        await client.query(`
+            DELETE FROM prescripcion
+            WHERE id_consulta IN (
+                SELECT cm.id_consulta FROM consulta_medica cm
+                INNER JOIN visita v ON cm.id_visita = v.id_visita
+                WHERE v.id_paciente = $1
+            )`, [id]);
+        await client.query(`
+            DELETE FROM consulta_medica
+            WHERE id_visita IN (SELECT id_visita FROM visita WHERE id_paciente = $1)`, [id]);
+        await client.query(`
+            DELETE FROM preconsulta
+            WHERE id_visita IN (SELECT id_visita FROM visita WHERE id_paciente = $1)`, [id]);
+        await client.query('DELETE FROM visita WHERE id_paciente = $1', [id]);
+        await client.query('DELETE FROM paciente WHERE id_paciente = $1', [id]);
+        await client.query(
+            `INSERT INTO bitacora (id_usuario, accion, tabla_afectada, id_registro_afectado, descripcion)
+             VALUES ($1, 'ELIMINAR_PACIENTE', 'paciente', $2, $3)`,
+            [id_usuario_editor, id, `Expediente eliminado definitivamente: ${rows[0].nombre_completo}`]
+        );
+        await client.query('COMMIT');
+        res.json({ message: 'Expediente eliminado correctamente' });
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error(error);
+        res.status(500).json({ error: 'Error al eliminar expediente' });
+    } finally {
+        client.release();
     }
 });
 
@@ -203,9 +257,10 @@ app.get('/api/usuarios', async (req, res) => {
     try {
         const { rows } = await pool.query(`
             SELECT u.id_usuario, u.nombre_completo, u.nombre_usuario,
-                   u.activo, u.fecha_creacion, u.ultimo_acceso, r.nombre_rol
+                   u.id_rol, u.contrasena_hash, u.activo, u.fecha_creacion, u.ultimo_acceso, r.nombre_rol
             FROM usuario u
             INNER JOIN rol r ON u.id_rol = r.id_rol
+            WHERE u.activo = TRUE
             ORDER BY u.id_usuario
         `);
         res.json(rows);
@@ -242,6 +297,39 @@ app.delete('/api/usuarios/:id', async (req, res) => {
         res.json({ message: 'Usuario desactivado correctamente' });
     } catch (error) {
         res.status(500).json({ error: 'Error al desactivar usuario' });
+    }
+});
+
+app.put('/api/usuarios/:id', async (req, res) => {
+    const { id } = req.params;
+    const { nombre_completo, nombre_usuario, id_rol, contrasena } = req.body;
+    if (!nombre_completo || !nombre_usuario || !id_rol) {
+        return res.status(400).json({ error: 'Nombre, usuario y rol son requeridos' });
+    }
+    try {
+        let query = `UPDATE usuario SET nombre_completo = $1, nombre_usuario = $2, id_rol = $3`;
+        const params = [nombre_completo, nombre_usuario, id_rol];
+        if (contrasena && contrasena.trim()) {
+            const hash = await bcrypt.hash(contrasena, 10);
+            query += `, contrasena_hash = $4`;
+            params.push(hash);
+        }
+        query += ` WHERE id_usuario = $${params.length + 1} RETURNING id_usuario`;
+        params.push(id);
+        const { rows } = await pool.query(query, params);
+        if (rows.length === 0) return res.status(404).json({ error: 'Usuario no encontrado' });
+        await pool.query(
+            `INSERT INTO bitacora (id_usuario, accion, tabla_afectada, id_registro_afectado, descripcion)
+             VALUES ($1, 'ACTUALIZAR_USUARIO', 'usuario', $2, $3)`,
+            [req.body.id_usuario_editor || 1, id, `Usuario actualizado: ${nombre_completo}`]
+        );
+        res.json({ message: 'Usuario actualizado correctamente' });
+    } catch (error) {
+        if (error.code === '23505') {
+            return res.status(409).json({ error: 'El nombre de usuario ya existe' });
+        }
+        console.error(error);
+        res.status(500).json({ error: 'Error al actualizar usuario' });
     }
 });
 
@@ -327,12 +415,7 @@ app.get('/api/visitas/:id', async (req, res) => {
 app.post('/api/preconsulta', async (req, res) => {
     const {
         id_visita,
-        presion_sistolica,
-        presion_diastolica,
-        frecuencia_cardiaca,
-        temperatura,
-        frecuencia_respiratoria,
-        saturacion_oxigeno,
+        presion_arterial,
         peso,
         talla,
         id_usuario_registro
@@ -342,39 +425,44 @@ app.post('/api/preconsulta', async (req, res) => {
         return res.status(400).json({ error: 'Visita y usuario son requeridos' });
     }
 
-    const imc = peso && talla ? (peso / (talla * talla)).toFixed(2) : null;
+    let presion_sistolica = null;
+    let presion_diastolica = null;
+    if (typeof presion_arterial === 'string' && presion_arterial.trim()) {
+        const partes = presion_arterial.trim().split('/').map(p => parseFloat(p));
+        if (partes.length === 2 && !isNaN(partes[0]) && !isNaN(partes[1])) {
+            presion_sistolica = partes[0];
+            presion_diastolica = partes[1];
+        } else if (partes.length === 1 && !isNaN(partes[0])) {
+            presion_sistolica = partes[0];
+        }
+    }
 
-    const alerta_signos = (
-        (presion_sistolica && (presion_sistolica > 140 || presion_sistolica < 90)) ||
-        (presion_diastolica && (presion_diastolica > 90 || presion_diastolica < 60)) ||
-        (frecuencia_cardiaca && (frecuencia_cardiaca > 100 || frecuencia_cardiaca < 60)) ||
-        (temperatura && (temperatura > 37.5 || temperatura < 35.5)) ||
-        (saturacion_oxigeno && saturacion_oxigeno < 95)
-    );
+    const imc = peso && talla ? ((peso * 0.453592) / (talla * talla)).toFixed(2) : null;
+
+    const sistolicaFuera = presion_sistolica ? (presion_sistolica > 140 || presion_sistolica < 90) : false;
+    const diastolicaFuera = presion_diastolica ? (presion_diastolica > 90 || presion_diastolica < 60) : false;
+    const alerta_signos = sistolicaFuera || diastolicaFuera;
 
     let detalle_alerta = [];
     if (presion_sistolica && (presion_sistolica > 140 || presion_sistolica < 90)) detalle_alerta.push(`Presión sistólica: ${presion_sistolica}`);
     if (presion_diastolica && (presion_diastolica > 90 || presion_diastolica < 60)) detalle_alerta.push(`Presión diastólica: ${presion_diastolica}`);
-    if (frecuencia_cardiaca && (frecuencia_cardiaca > 100 || frecuencia_cardiaca < 60)) detalle_alerta.push(`FC: ${frecuencia_cardiaca}`);
-    if (temperatura && (temperatura > 37.5 || temperatura < 35.5)) detalle_alerta.push(`Temp: ${temperatura}°C`);
-    if (saturacion_oxigeno && saturacion_oxigeno < 95) detalle_alerta.push(`SpO2: ${saturacion_oxigeno}%`);
 
     try {
         await pool.query('BEGIN');
 
         const { rows } = await pool.query(
             `INSERT INTO preconsulta (
-                id_visita, presion_sistolica, presion_diastolica, frecuencia_cardiaca,
-                temperatura, frecuencia_respiratoria, saturacion_oxigeno,
+                id_visita, presion_sistolica, presion_diastolica,
+                frecuencia_cardiaca, temperatura, frecuencia_respiratoria, saturacion_oxigeno,
                 peso, talla, imc, alerta_signos, detalle_alerta, id_usuario_registro
-             ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+             ) VALUES ($1,$2,$3,NULL,NULL,NULL,NULL,$4,$5,$6,$7,$8,$9)
              ON CONFLICT (id_visita) DO UPDATE SET
                 presion_sistolica = EXCLUDED.presion_sistolica,
                 presion_diastolica = EXCLUDED.presion_diastolica,
-                frecuencia_cardiaca = EXCLUDED.frecuencia_cardiaca,
-                temperatura = EXCLUDED.temperatura,
-                frecuencia_respiratoria = EXCLUDED.frecuencia_respiratoria,
-                saturacion_oxigeno = EXCLUDED.saturacion_oxigeno,
+                frecuencia_cardiaca = NULL,
+                temperatura = NULL,
+                frecuencia_respiratoria = NULL,
+                saturacion_oxigeno = NULL,
                 peso = EXCLUDED.peso,
                 talla = EXCLUDED.talla,
                 imc = EXCLUDED.imc,
@@ -385,12 +473,8 @@ app.post('/api/preconsulta', async (req, res) => {
              RETURNING *`,
             [
                 id_visita,
-                presion_sistolica || null,
-                presion_diastolica || null,
-                frecuencia_cardiaca || null,
-                temperatura || null,
-                frecuencia_respiratoria || null,
-                saturacion_oxigeno || null,
+                presion_sistolica,
+                presion_diastolica,
                 peso || null,
                 talla || null,
                 imc,
@@ -499,6 +583,359 @@ app.get('/api/consulta_medica/:id_visita', async (req, res) => {
     } catch (error) {
         console.error(error);
         res.status(500).json({ error: 'Error obteniendo consulta médica' });
+    }
+});
+
+// ============================================================
+// INVENTARIO DE MEDICINA
+// ============================================================
+
+// ---- CATEGORÍAS DE MEDICAMENTOS ----
+app.get('/api/categorias', async (req, res) => {
+    try {
+        const { rows } = await pool.query(
+            'SELECT * FROM categoria_medicamento ORDER BY nombre_categoria'
+        );
+        res.json(rows);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Error obteniendo categorías' });
+    }
+});
+
+app.post('/api/categorias', async (req, res) => {
+    const { nombre_categoria, descripcion } = req.body;
+    if (!nombre_categoria) {
+        return res.status(400).json({ error: 'El nombre de la categoría es requerido' });
+    }
+    try {
+        const { rows } = await pool.query(
+            `INSERT INTO categoria_medicamento (nombre_categoria, descripcion)
+             VALUES ($1, $2) RETURNING *`,
+            [nombre_categoria, descripcion || null]
+        );
+        res.status(201).json(rows[0]);
+    } catch (error) {
+        if (error.code === '23505') {
+            return res.status(409).json({ error: 'Esa categoría ya existe' });
+        }
+        console.error(error);
+        res.status(500).json({ error: 'Error al crear categoría' });
+    }
+});
+
+// ---- MEDICAMENTOS (catálogo + stock) ----
+app.get('/api/medicamentos', async (req, res) => {
+    try {
+        const { rows } = await pool.query(`
+            SELECT
+              m.id_medicamento,
+              m.nombre_medicamento,
+              m.nombre_generico,
+              m.forma_farmaceutica,
+              m.concentracion,
+              m.unidad_medida,
+              m.stock_minimo,
+              m.requiere_receta,
+              m.fecha_creacion,
+              c.id_categoria,
+              c.nombre_categoria,
+              COALESCE(SUM(l.cantidad_actual), 0)::INT AS stock_total,
+              COALESCE(MIN(l.fecha_vencimiento)
+                FILTER (WHERE l.cantidad_actual > 0), NULL) AS proximo_vencimiento,
+              COALESCE(SUM(l.cantidad_actual)
+                FILTER (WHERE l.cantidad_actual > 0
+                        AND l.fecha_vencimiento <= CURRENT_DATE + INTERVAL '90 days'), 0)::INT AS stock_por_vencer
+            FROM medicamento m
+            LEFT JOIN categoria_medicamento c ON m.id_categoria = c.id_categoria
+            LEFT JOIN lote_medicamento l ON l.id_medicamento = m.id_medicamento
+            WHERE m.activo = TRUE
+            GROUP BY m.id_medicamento, c.id_categoria, c.nombre_categoria
+            ORDER BY m.nombre_medicamento
+        `);
+        res.json(rows);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Error obteniendo medicamentos' });
+    }
+});
+
+app.post('/api/medicamentos', async (req, res) => {
+    const {
+        nombre_medicamento, nombre_generico, id_categoria, forma_farmaceutica,
+        concentracion, unidad_medida, stock_minimo, requiere_receta, id_usuario_registro
+    } = req.body;
+    if (!nombre_medicamento || !unidad_medida) {
+        return res.status(400).json({ error: 'El nombre y la unidad de medida son obligatorios' });
+    }
+    try {
+        const { rows } = await pool.query(
+            `INSERT INTO medicamento (
+                nombre_medicamento, nombre_generico, id_categoria, forma_farmaceutica,
+                concentracion, unidad_medida, stock_minimo, requiere_receta
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id_medicamento`,
+            [
+                nombre_medicamento,
+                nombre_generico || null,
+                id_categoria || null,
+                forma_farmaceutica || null,
+                concentracion || null,
+                unidad_medida,
+                stock_minimo ?? 0,
+                requiere_receta ?? true
+            ]
+        );
+        await pool.query(
+            `INSERT INTO bitacora (id_usuario, accion, tabla_afectada, id_registro_afectado, descripcion)
+             VALUES ($1, 'CREAR_MEDICAMENTO', 'medicamento', $2, $3)`,
+            [id_usuario_registro || 1, rows[0].id_medicamento, `Nuevo medicamento: ${nombre_medicamento}`]
+        );
+        res.status(201).json({ id: rows[0].id_medicamento, message: 'Medicamento registrado correctamente' });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Error al registrar medicamento' });
+    }
+});
+
+app.put('/api/medicamentos/:id', async (req, res) => {
+    const { id } = req.params;
+    const {
+        nombre_medicamento, nombre_generico, id_categoria, forma_farmaceutica,
+        concentracion, unidad_medida, stock_minimo, requiere_receta, id_usuario_editor
+    } = req.body;
+    if (!nombre_medicamento || !unidad_medida) {
+        return res.status(400).json({ error: 'El nombre y la unidad de medida son obligatorios' });
+    }
+    try {
+        const { rows } = await pool.query(
+            `UPDATE medicamento SET
+                nombre_medicamento = $1,
+                nombre_generico = $2,
+                id_categoria = $3,
+                forma_farmaceutica = $4,
+                concentracion = $5,
+                unidad_medida = $6,
+                stock_minimo = $7,
+                requiere_receta = $8
+             WHERE id_medicamento = $9 RETURNING id_medicamento`,
+            [
+                nombre_medicamento,
+                nombre_generico || null,
+                id_categoria || null,
+                forma_farmaceutica || null,
+                concentracion || null,
+                unidad_medida,
+                stock_minimo ?? 0,
+                requiere_receta ?? true,
+                id
+            ]
+        );
+        if (rows.length === 0) {
+            return res.status(404).json({ error: 'Medicamento no encontrado' });
+        }
+        await pool.query(
+            `INSERT INTO bitacora (id_usuario, accion, tabla_afectada, id_registro_afectado, descripcion)
+             VALUES ($1, 'ACTUALIZAR_MEDICAMENTO', 'medicamento', $2, $3)`,
+            [id_usuario_editor || 1, id, `Medicamento actualizado: ${nombre_medicamento}`]
+        );
+        res.json({ message: 'Medicamento actualizado correctamente' });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Error al actualizar medicamento' });
+    }
+});
+
+// Elimina (desactiva) un medicamento; los lotes e históricos se conservan.
+app.delete('/api/medicamentos/:id', async (req, res) => {
+    const { id } = req.params;
+    const id_usuario_editor = req.body?.id_usuario_editor || 1;
+    try {
+        const { rows } = await pool.query(
+            'SELECT nombre_medicamento FROM medicamento WHERE id_medicamento = $1 AND activo = TRUE', [id]
+        );
+        if (rows.length === 0) {
+            return res.status(404).json({ error: 'Medicamento no encontrado' });
+        }
+        await pool.query('UPDATE medicamento SET activo = FALSE WHERE id_medicamento = $1', [id]);
+        await pool.query(
+            `INSERT INTO bitacora (id_usuario, accion, tabla_afectada, id_registro_afectado, descripcion)
+             VALUES ($1, 'ELIMINAR_MEDICAMENTO', 'medicamento', $2, $3)`,
+            [id_usuario_editor, id, `Medicamento eliminado: ${rows[0].nombre_medicamento}`]
+        );
+        res.json({ message: 'Medicamento eliminado correctamente' });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Error al eliminar medicamento' });
+    }
+});
+
+// ---- LOTES (entradas de inventario) ----
+app.get('/api/lotes', async (req, res) => {
+    const { id_medicamento } = req.query;
+    try {
+        const query = `
+            SELECT
+              l.*,
+              m.nombre_medicamento,
+              m.unidad_medida
+            FROM lote_medicamento l
+            INNER JOIN medicamento m ON l.id_medicamento = m.id_medicamento
+            ${id_medicamento ? 'WHERE l.id_medicamento = $1' : ''}
+            ORDER BY l.fecha_vencimiento ASC
+        `;
+        const { rows } = await pool.query(query, id_medicamento ? [id_medicamento] : []);
+        res.json(rows);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Error obteniendo lotes' });
+    }
+});
+
+// Elimina un lote (solo si no tiene unidades dispensadas a pacientes).
+app.delete('/api/lotes/:id', async (req, res) => {
+    const { id } = req.params;
+    const id_usuario_editor = req.body?.id_usuario_editor || 1;
+    const client = await pool.connect();
+    try {
+        await client.query('BEGIN');
+        const { rows } = await client.query(
+            `SELECT l.numero_lote, m.nombre_medicamento
+             FROM lote_medicamento l
+             INNER JOIN medicamento m ON l.id_medicamento = m.id_medicamento
+             WHERE l.id_lote = $1`, [id]
+        );
+        if (rows.length === 0) {
+            await client.query('ROLLBACK');
+            return res.status(404).json({ error: 'Lote no encontrado' });
+        }
+        const disp = await client.query(
+            'SELECT COUNT(*)::INT AS n FROM dispensacion WHERE id_lote = $1', [id]
+        );
+        if (disp.rows[0].n > 0) {
+            await client.query('ROLLBACK');
+            return res.status(409).json({ error: 'No se puede eliminar: el lote ya tiene unidades dispensadas a pacientes' });
+        }
+        await client.query('DELETE FROM movimiento_inventario WHERE id_lote = $1', [id]);
+        await client.query('DELETE FROM lote_medicamento WHERE id_lote = $1', [id]);
+        await client.query(
+            `INSERT INTO bitacora (id_usuario, accion, tabla_afectada, id_registro_afectado, descripcion)
+             VALUES ($1, 'ELIMINAR_LOTE', 'lote_medicamento', $2, $3)`,
+            [id_usuario_editor, id, `Lote ${rows[0].numero_lote} de ${rows[0].nombre_medicamento} eliminado`]
+        );
+        await client.query('COMMIT');
+        res.json({ message: 'Lote eliminado correctamente' });
+    } catch (error) {
+        await client.query('ROLLBACK');
+        console.error(error);
+        res.status(500).json({ error: 'Error al eliminar lote' });
+    } finally {
+        client.release();
+    }
+});
+
+app.post('/api/lotes', async (req, res) => {
+    const client = await pool.connect();
+    const {
+        id_medicamento, numero_lote, fecha_fabricacion, fecha_vencimiento,
+        cantidad, precio_compra_unitario, motivo, id_usuario_registro
+    } = req.body;
+    if (!id_medicamento || !numero_lote || !fecha_vencimiento || !cantidad) {
+        return res.status(400).json({ error: 'Medicamento, número de lote, vencimiento y cantidad son obligatorios' });
+    }
+    try {
+        await client.query('BEGIN');
+        const { rows } = await client.query(
+            `INSERT INTO lote_medicamento (
+                id_medicamento, numero_lote, fecha_fabricacion, fecha_vencimiento,
+                cantidad_inicial, cantidad_actual, precio_compra_unitario, id_usuario_registro
+             ) VALUES ($1, $2, $3, $4, $5, $5, $6, $7) RETURNING *`,
+            [
+                id_medicamento,
+                numero_lote,
+                fecha_fabricacion || null,
+                fecha_vencimiento,
+                cantidad,
+                precio_compra_unitario || null,
+                id_usuario_registro || null
+            ]
+        );
+        await client.query(
+            `INSERT INTO movimiento_inventario (id_lote, tipo_movimiento, cantidad, motivo, id_usuario)
+             VALUES ($1, 'entrada', $2, $3, $4)`,
+            [rows[0].id_lote, cantidad, motivo || 'compra', id_usuario_registro || null]
+        );
+        await client.query(
+            `INSERT INTO bitacora (id_usuario, accion, tabla_afectada, id_registro_afectado, descripcion)
+             VALUES ($1, 'INGRESAR_LOTE', 'lote_medicamento', $2, $3)`,
+            [id_usuario_registro || 1, rows[0].id_lote, `Entrada de ${cantidad} unidades del lote ${numero_lote}`]
+        );
+        await client.query('COMMIT');
+        res.status(201).json(rows[0]);
+    } catch (error) {
+        await client.query('ROLLBACK');
+        if (error.code === '23505') {
+            return res.status(409).json({ error: 'Ese número de lote ya está registrado para este medicamento' });
+        }
+        console.error(error);
+        res.status(500).json({ error: 'Error al ingresar lote' });
+    } finally {
+        client.release();
+    }
+});
+
+// ---- KARDEX / MOVIMIENTOS DE INVENTARIO ----
+app.get('/api/inventario/movimientos', async (req, res) => {
+    const { limit = 50 } = req.query;
+    try {
+        const { rows } = await pool.query(`
+            SELECT
+              mi.*,
+              m.nombre_medicamento,
+              l.numero_lote,
+              u.nombre_completo AS nombre_usuario
+            FROM movimiento_inventario mi
+            INNER JOIN lote_medicamento l ON mi.id_lote = l.id_lote
+            INNER JOIN medicamento m ON l.id_medicamento = m.id_medicamento
+            LEFT JOIN usuario u ON mi.id_usuario = u.id_usuario
+            ORDER BY mi.fecha_hora DESC
+            LIMIT $1
+        `, [parseInt(limit) || 50]);
+        res.json(rows);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Error obteniendo movimientos de inventario' });
+    }
+});
+
+// ---- RESUMEN DE INVENTARIO (para tarjetas de alerta) ----
+app.get('/api/inventario/resumen', async (req, res) => {
+    try {
+        const { rows } = await pool.query(`
+            WITH resumen AS (
+              SELECT
+                m.id_medicamento,
+                m.stock_minimo,
+                COALESCE(SUM(l.cantidad_actual) FILTER (WHERE l.cantidad_actual > 0), 0)::INT AS stock_total,
+                COALESCE(SUM(l.cantidad_actual) FILTER (
+                  WHERE l.cantidad_actual > 0
+                    AND l.fecha_vencimiento <= CURRENT_DATE + INTERVAL '90 days'
+                ), 0)::INT AS stock_por_vencer
+              FROM medicamento m
+              LEFT JOIN lote_medicamento l ON l.id_medicamento = m.id_medicamento
+              WHERE m.activo = TRUE
+              GROUP BY m.id_medicamento
+            )
+            SELECT
+              COUNT(*)::INT AS total_medicamentos,
+              COALESCE(SUM(stock_total), 0)::INT AS stock_total_unidades,
+              COUNT(*) FILTER (WHERE stock_por_vencer > 0)::INT AS medicamentos_por_vencer,
+              COUNT(*) FILTER (WHERE stock_total <= stock_minimo)::INT AS medicamentos_stock_bajo
+            FROM resumen
+        `);
+        res.json(rows[0]);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Error obteniendo resumen de inventario' });
     }
 });
 

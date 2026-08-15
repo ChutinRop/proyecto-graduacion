@@ -223,3 +223,98 @@ SELECT
 FROM visita v
   LEFT JOIN preconsulta pr ON v.id_visita = pr.id_visita
 WHERE v.fecha_visita::DATE = CURRENT_DATE;
+
+-- ============================================================
+--  MÓDULO: INVENTARIO DE MEDICINA (NUEVO)
+-- ============================================================
+
+-- Categorías/clasificación de medicamentos (analgésicos, antibióticos, etc.)
+CREATE TABLE IF NOT EXISTS categoria_medicamento (
+  id_categoria     SERIAL        PRIMARY KEY,
+  nombre_categoria VARCHAR(100)  NOT NULL UNIQUE,
+  descripcion      VARCHAR(250)
+);
+
+-- Catálogo maestro de medicamentos (NO guarda existencias, eso va en lote)
+CREATE TABLE IF NOT EXISTS medicamento (
+  id_medicamento     SERIAL        PRIMARY KEY,
+  nombre_medicamento VARCHAR(150)  NOT NULL,
+  nombre_generico    VARCHAR(150),
+  id_categoria       INT           REFERENCES categoria_medicamento(id_categoria),
+  forma_farmaceutica VARCHAR(50),
+  concentracion      VARCHAR(50),
+  unidad_medida      VARCHAR(20)   NOT NULL,
+  stock_minimo       INT           NOT NULL DEFAULT 0,
+  requiere_receta    BOOLEAN       NOT NULL DEFAULT TRUE,
+  activo             BOOLEAN       NOT NULL DEFAULT TRUE,
+  fecha_creacion     TIMESTAMP     NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_medicamento_nombre ON medicamento(nombre_medicamento);
+
+-- Lotes: cada compra/ingreso genera un lote con su vencimiento (control FEFO)
+CREATE TABLE IF NOT EXISTS lote_medicamento (
+  id_lote                 SERIAL        PRIMARY KEY,
+  id_medicamento          INT           NOT NULL REFERENCES medicamento(id_medicamento),
+  numero_lote             VARCHAR(50)   NOT NULL,
+  fecha_fabricacion       DATE,
+  fecha_vencimiento       DATE          NOT NULL,
+  cantidad_inicial        INT           NOT NULL,
+  cantidad_actual         INT           NOT NULL,
+  precio_compra_unitario  NUMERIC(10,2),
+  fecha_ingreso           TIMESTAMP     NOT NULL DEFAULT NOW(),
+  id_usuario_registro     INT           REFERENCES usuario(id_usuario),
+  UNIQUE (id_medicamento, numero_lote)
+);
+
+CREATE INDEX IF NOT EXISTS idx_lote_medicamento ON lote_medicamento(id_medicamento);
+CREATE INDEX IF NOT EXISTS idx_lote_vencimiento ON lote_medicamento(fecha_vencimiento);
+
+-- Kardex: registra cada entrada, salida o ajuste del almacén de farmacia
+CREATE TABLE IF NOT EXISTS movimiento_inventario (
+  id_movimiento     SERIAL        PRIMARY KEY,
+  id_lote           INT           NOT NULL REFERENCES lote_medicamento(id_lote),
+  tipo_movimiento   VARCHAR(20)   NOT NULL
+                      CHECK (tipo_movimiento IN ('entrada','salida','ajuste','merma','devolucion')),
+  cantidad          INT           NOT NULL,
+  motivo            VARCHAR(200),
+  id_usuario        INT           REFERENCES usuario(id_usuario),
+  fecha_hora        TIMESTAMP     NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_movimiento_lote  ON movimiento_inventario(id_lote);
+CREATE INDEX IF NOT EXISTS idx_movimiento_fecha ON movimiento_inventario(fecha_hora);
+
+-- Prescripción médica generada dentro de una consulta
+CREATE TABLE IF NOT EXISTS prescripcion (
+  id_prescripcion           SERIAL        PRIMARY KEY,
+  id_consulta               INT           NOT NULL REFERENCES consulta_medica(id_consulta),
+  id_medicamento            INT           NOT NULL REFERENCES medicamento(id_medicamento),
+  dosis                     VARCHAR(100),
+  frecuencia                VARCHAR(100),
+  duracion_dias             SMALLINT,
+  cantidad_recetada         INT           NOT NULL,
+  indicaciones_adicionales  TEXT,
+  fecha_hora                TIMESTAMP     NOT NULL DEFAULT NOW()
+);
+
+-- Dispensación: entrega física del medicamento, descontando de un lote (trazabilidad)
+CREATE TABLE IF NOT EXISTS dispensacion (
+  id_dispensacion     SERIAL        PRIMARY KEY,
+  id_prescripcion     INT           NOT NULL REFERENCES prescripcion(id_prescripcion),
+  id_lote             INT           REFERENCES lote_medicamento(id_lote),
+  cantidad_dispensada INT           NOT NULL,
+  id_usuario_dispensa INT           REFERENCES usuario(id_usuario),
+  fecha_hora          TIMESTAMP     NOT NULL DEFAULT NOW(),
+  observaciones       VARCHAR(250)
+);
+
+INSERT INTO categoria_medicamento (nombre_categoria, descripcion) VALUES
+  ('Analgésicos',         'Alivio del dolor'),
+  ('Antibióticos',        'Tratamiento de infecciones bacterianas'),
+  ('Antiinflamatorios',   'Reducción de inflamación'),
+  ('Antihistamínicos',    'Tratamiento de alergias'),
+  ('Antihipertensivos',   'Control de presión arterial'),
+  ('Antipiréticos',       'Control de fiebre'),
+  ('Antigripales',        'Tratamiento de resfriados y gripe')
+ON CONFLICT (nombre_categoria) DO NOTHING;

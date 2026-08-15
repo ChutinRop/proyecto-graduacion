@@ -6,6 +6,7 @@ import Login from "./pages/Login";
 import ControlAcceso from "./pages/ControlAcceso";
 import Preconsulta from "./pages/Preconsulta";
 import ConsultaMedica from "./pages/ConsultaMedica";
+import Inventario from "./pages/Inventario";
 
 const ProtectedRoute = ({ children }) => {
   const isAuth = localStorage.getItem("auth");
@@ -37,6 +38,7 @@ function App() {
         <Route path="/admin" element={<RoleRoute roles={["administrador", "director", "medico"]}><ControlAcceso /></RoleRoute>} />
         <Route path="/preconsulta" element={<ProtectedRoute><Preconsulta /></ProtectedRoute>} />
         <Route path="/consulta" element={<ProtectedRoute><ConsultaMedica /></ProtectedRoute>} />
+        <Route path="/inventario" element={<RoleRoute roles={["administrador", "director"]}><Inventario /></RoleRoute>} />
       </Routes>
     </Router>
   );

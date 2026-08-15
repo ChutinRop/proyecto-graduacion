@@ -32,6 +32,17 @@ export const api = {
     return data;
   },
 
+  eliminarPaciente: async (id, idUsuario) => {
+    const res = await fetch(`${API_URL}/patients/${id}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id_usuario_editor: idUsuario }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al eliminar expediente');
+    return data;
+  },
+
   // VISITAS
   crearVisita: async (visita) => {
     const res = await fetch(`${API_URL}/visitas`, {
@@ -122,6 +133,17 @@ export const api = {
     return res.json();
   },
 
+  actualizarUsuario: async (id, usuario) => {
+    const res = await fetch(`${API_URL}/usuarios/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(usuario),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al actualizar usuario');
+    return data;
+  },
+
   // EXPEDIENTE DE PACIENTE
   getExpediente: async (id_paciente) => {
     const res = await fetch(`${API_URL}/expediente/${id_paciente}`);
@@ -132,6 +154,104 @@ export const api = {
   getRoles: async () => {
     const res = await fetch(`${API_URL}/roles`);
     if (!res.ok) throw new Error('Error obteniendo roles');
+    return res.json();
+  },
+
+  // INVENTARIO DE MEDICINA
+  getCategorias: async () => {
+    const res = await fetch(`${API_URL}/categorias`);
+    if (!res.ok) throw new Error('Error obteniendo categorías');
+    return res.json();
+  },
+
+  crearCategoria: async (categoria) => {
+    const res = await fetch(`${API_URL}/categorias`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(categoria),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al crear categoría');
+    return data;
+  },
+
+  getMedicamentos: async () => {
+    const res = await fetch(`${API_URL}/medicamentos`);
+    if (!res.ok) throw new Error('Error obteniendo medicamentos');
+    return res.json();
+  },
+
+  crearMedicamento: async (medicamento) => {
+    const res = await fetch(`${API_URL}/medicamentos`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(medicamento),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al registrar medicamento');
+    return data;
+  },
+
+  actualizarMedicamento: async (id, medicamento) => {
+    const res = await fetch(`${API_URL}/medicamentos/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(medicamento),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al actualizar medicamento');
+    return data;
+  },
+
+  eliminarMedicamento: async (id, idUsuario) => {
+    const res = await fetch(`${API_URL}/medicamentos/${id}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id_usuario_editor: idUsuario }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al eliminar medicamento');
+    return data;
+  },
+
+  getLotes: async (id_medicamento) => {
+    const q = id_medicamento ? `?id_medicamento=${id_medicamento}` : '';
+    const res = await fetch(`${API_URL}/lotes${q}`);
+    if (!res.ok) throw new Error('Error obteniendo lotes');
+    return res.json();
+  },
+
+  eliminarLote: async (id, idUsuario) => {
+    const res = await fetch(`${API_URL}/lotes/${id}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id_usuario_editor: idUsuario }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al eliminar lote');
+    return data;
+  },
+
+  ingresarLote: async (lote) => {
+    const res = await fetch(`${API_URL}/lotes`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(lote),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Error al ingresar lote');
+    return data;
+  },
+
+  getMovimientosInventario: async () => {
+    const res = await fetch(`${API_URL}/inventario/movimientos`);
+    if (!res.ok) throw new Error('Error obteniendo movimientos de inventario');
+    return res.json();
+  },
+
+  getResumenInventario: async () => {
+    const res = await fetch(`${API_URL}/inventario/resumen`);
+    if (!res.ok) throw new Error('Error obteniendo resumen de inventario');
     return res.json();
   },
 };

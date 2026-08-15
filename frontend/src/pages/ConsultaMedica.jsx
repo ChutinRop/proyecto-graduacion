@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { LayoutGrid, UserPlus, FolderOpen, Shield, Plus, Search, Bell, HelpCircle, LogOut, Loader2, CheckCircle2, AlertCircle, FileText, Pill, Calendar, HeartPulse, ArrowLeft, Activity } from "lucide-react";
+import { LayoutGrid, UserPlus, FolderOpen, Shield, Package, Plus, Search, Bell, HelpCircle, LogOut, Loader2, CheckCircle2, AlertCircle, FileText, Pill, Calendar, HeartPulse, ArrowLeft } from "lucide-react";
 import { api } from "../services/api";
-import { filtrarNav } from "../services/permisos";
+import { filtrarNav, roleLabels } from "../services/permisos";
 
 const navItems = [
   { label: "Panel de Control", icon: LayoutGrid, path: "/" },
   { label: "Registro de Pacientes", icon: UserPlus, path: "/registro" },
   { label: "Expedientes Clínicos", icon: FolderOpen, path: "/expedientes" },
+  { label: "Inventario", icon: Package, path: "/inventario" },
   { label: "Control de Acceso", icon: Shield, path: "/admin" },
 ];
 
@@ -90,6 +91,10 @@ export default function ConsultaMedica() {
       await api.registrarConsulta(data);
       setFeedback({ type: "ok", msg: "Consulta médica guardada. Estado: COMPLETADO" });
       setConsultaExistente(data);
+      setTimeout(() => {
+        if (paciente?.id_paciente) navigate(`/expedientes?id=${paciente.id_paciente}`);
+        else navigate("/expedientes");
+      }, 900);
     } catch (err) {
       setFeedback({ type: "err", msg: err.message });
     } finally {
@@ -116,9 +121,6 @@ export default function ConsultaMedica() {
     const ranges = {
       presion_sistolica: { min: 90, max: 140 },
       presion_diastolica: { min: 60, max: 90 },
-      frecuencia_cardiaca: { min: 60, max: 100 },
-      temperatura: { min: 35.5, max: 37.5 },
-      saturacion_oxigeno: { min: 95, max: 100 },
     };
     const r = ranges[key];
     return r && (val < r.min || val > r.max);
@@ -128,14 +130,9 @@ export default function ConsultaMedica() {
     <div className="flex h-screen bg-[#f7f9fb] font-sans text-[#191c1e] overflow-hidden">
       <aside className="w-[255px] h-full flex-shrink-0 bg-white border-r border-[#c2c6d4] flex flex-col justify-between">
         <div className="p-4 overflow-y-auto">
-          <div className="flex items-center gap-3 pb-6">
-            <div className="w-9 h-9 rounded-md bg-[#00478d] text-white flex items-center justify-center">
-              <FileText size={20} />
-            </div>
-            <div>
-              <div className="font-bold text-[16px] text-[#00478d]">CMP Zaculeu</div>
-              <div className="text-xs text-[#424752]">Consulta Médica</div>
-            </div>
+          <div className="pb-6">
+            <div className="font-bold text-lg text-[#00478d]">CMP Zaculeu</div>
+            <div className="text-xs text-[#424752] mt-0.5 capitalize">{roleLabels[user.rol] || user.rol}</div>
           </div>
           <nav className="flex flex-col gap-1">
             {nav.map(({ label, icon: Icon, path }) => (
@@ -203,13 +200,9 @@ export default function ConsultaMedica() {
               </div>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <VitalCard label="Presión" value={`${preconsulta.presion_sistolica || "—"}/${preconsulta.presion_diastolica || "—"}`} unit="mmHg" icon={HeartPulse} color="text-[#e53e3e]" alert={isAlert("presion_sistolica", preconsulta.presion_sistolica) || isAlert("presion_diastolica", preconsulta.presion_diastolica)} />
-                <VitalCard label="FC" value={preconsulta.frecuencia_cardiaca || "—"} unit="lpm" icon={Activity} color="text-[#dd6b20]" alert={isAlert("frecuencia_cardiaca", preconsulta.frecuencia_cardiaca)} />
-                <VitalCard label="Temp" value={preconsulta.temperatura || "—"} unit="°C" icon={HeartPulse} color="text-[#f6ad55]" alert={isAlert("temperatura", preconsulta.temperatura)} />
-                <VitalCard label="SpO₂" value={preconsulta.saturacion_oxigeno || "—"} unit="%" icon={HeartPulse} color="text-[#3182ce]" alert={isAlert("saturacion_oxigeno", preconsulta.saturacion_oxigeno)} />
-                <VitalCard label="Peso" value={preconsulta.peso || "—"} unit="kg" icon={HeartPulse} color="text-[#805ad5]" />
+                <VitalCard label="Peso" value={preconsulta.peso || "—"} unit="lb" icon={HeartPulse} color="text-[#805ad5]" />
                 <VitalCard label="Talla" value={preconsulta.talla || "—"} unit="m" icon={HeartPulse} color="text-[#d69e2e]" />
                 <VitalCard label="IMC" value={preconsulta.imc || "—"} unit="" icon={HeartPulse} color="text-[#276749]" />
-                <VitalCard label="FR" value={preconsulta.frecuencia_respiratoria || "—"} unit="rpm" icon={HeartPulse} color="text-[#38b2ac]" />
               </div>
               {preconsulta.alerta_signos && (
                 <div className="mt-4 p-3 bg-[#fff5f5] border-l-4 border-[#ba1a1a] rounded-r">

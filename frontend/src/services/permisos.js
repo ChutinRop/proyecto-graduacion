@@ -6,6 +6,14 @@ export const roles = {
   triaje: ["administrador", "director", "medico", "enfermera"],
   consulta: ["administrador", "director", "medico"],
   crearVisita: ["administrador", "medico", "enfermera"],
+  inventario: ["administrador", "director"],
+};
+
+export const roleLabels = {
+  enfermera: "Personal de Enfermería",
+  medico: "Personal Médico",
+  administrador: "Panel Administrativo",
+  director: "Dirección Médica",
 };
 
 // Filtra los ítems del menú lateral según el rol del usuario
@@ -13,5 +21,6 @@ export const filtrarNav = (rol, items) =>
   items.filter((item) => {
     if (item.path === "/admin") return roles.admin.includes(rol);
     if (item.path === "/registro") return roles.registro.includes(rol);
+    if (item.path === "/inventario") return roles.inventario.includes(rol);
     return true;
   });

@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from "react";
 import {
-  LayoutGrid, UserPlus, FolderOpen, Shield, Plus, Search, Bell, HelpCircle,
+  LayoutGrid, UserPlus, FolderOpen, Shield, Package, Search, Bell, HelpCircle,
   LogOut, Users, Clock, FileText, Calendar, Filter, Download, Eye, Pencil,
   Megaphone, AlertTriangle, Info, History, Loader2,
-  Stethoscope, HeartPulse, UserCheck, X,
+  Stethoscope, HeartPulse, UserCheck,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../services/api";
@@ -12,6 +12,7 @@ const navItems = [
   { label: "Panel de Control", icon: LayoutGrid, path: "/", roles: ["administrador", "director", "medico", "enfermera"] },
   { label: "Registro de Pacientes", icon: UserPlus, path: "/registro", roles: ["administrador", "medico", "enfermera"] },
   { label: "Expedientes Clínicos", icon: FolderOpen, path: "/expedientes", roles: ["administrador", "director", "medico", "enfermera"] },
+  { label: "Inventario", icon: Package, path: "/inventario", roles: ["administrador", "director"] },
   { label: "Control de Acceso", icon: Shield, path: "/admin", roles: ["administrador", "director", "medico"] },
 ];
 
@@ -71,15 +72,11 @@ export default function PanelControl() {
   const [visitas, setVisitas] = useState([]);
   const [stats, setStats] = useState({ total_visitas_hoy: 0, pendientes: 0, en_triaje: 0, completados: 0, ultima_hora: 0 });
   const [loading, setLoading] = useState(true);
-  const [showVisitaModal, setShowVisitaModal] = useState(false);
-  const [pacientes, setPacientes] = useState([]);
-  const [visitaForm, setVisitaForm] = useState({ id_paciente: "", motivo_consulta: "" });
-  const [visitaLoading, setVisitaLoading] = useState(false);
+  const [busquedaExpediente, setBusquedaExpediente] = useState("");
 
   const user = JSON.parse(localStorage.getItem("auth") || "{}");
   const rol = user.rol || "enfermera";
   const filteredNav = navItems.filter((n) => n.roles.includes(rol));
-  const puedeCrearVisita = ["enfermera", "administrador", "medico"].includes(rol);
   const statCards = (roleStats[rol] || roleStats.enfermera).map((s) => ({
     ...s,
     value: stats[s.value],
@@ -93,10 +90,9 @@ export default function PanelControl() {
 
   const fetchData = async () => {
     try {
-      const [v, s, p] = await Promise.all([api.getVisitasHoy(), api.getEstadisticas(), api.getPacientes()]);
+      const [v, s] = await Promise.all([api.getVisitasHoy(), api.getEstadisticas()]);
       setVisitas(v);
       setStats(s);
-      setPacientes(p);
     } catch (err) {
       console.error(err);
     } finally {
@@ -105,23 +101,6 @@ export default function PanelControl() {
   };
 
   useEffect(() => { fetchData(); }, []);
-
-  const handleCrearVisita = async (e) => {
-    e.preventDefault();
-    if (!visitaForm.id_paciente || !user.id) return;
-    setVisitaLoading(true);
-    try {
-      await api.crearVisita({ ...visitaForm, id_paciente: parseInt(visitaForm.id_paciente), id_usuario_registro: user.id });
-      setShowVisitaModal(false);
-      setVisitaForm({ id_paciente: "", motivo_consulta: "" });
-      fetchData();
-    } catch (err) {
-      console.error(err);
-      alert(err.message);
-    } finally {
-      setVisitaLoading(false);
-    }
-  };
 
   return (
     <div className="flex h-screen bg-[#f7f9fb] font-sans text-[#191c1e] overflow-hidden">
@@ -142,11 +121,6 @@ export default function PanelControl() {
           </nav>
         </div>
         <div className="p-4 border-t border-[#c2c6d4] flex flex-col gap-3 shrink-0">
-          {puedeCrearVisita && (
-            <button onClick={() => { setVisitaForm({ id_paciente: "", motivo_consulta: "" }); setShowVisitaModal(true); }} className="w-full min-h-[48px] bg-[#005eb8] text-white rounded font-semibold text-sm flex items-center justify-center gap-2 hover:bg-[#00478d] transition-colors">
-              <Plus size={18} /> Nueva Visita
-            </button>
-          )}
           <div onClick={handleLogout} className="flex items-center gap-2 px-3 py-2 text-sm text-[#424752] hover:bg-[#f2f4f6] rounded-md cursor-pointer transition-colors">
             <LogOut size={16} /> Cerrar Sesión
           </div>
@@ -160,7 +134,19 @@ export default function PanelControl() {
           </div>
           <div className="flex items-center gap-5">
             <div className="flex items-center gap-2 w-[280px] bg-[#f2f4f6] border border-[#c2c6d4] rounded px-3.5 py-2.5 text-sm text-[#424752]">
-              <Search size={16} /> Buscar expediente...
+              <Search size={16} className="shrink-0" />
+              <input
+                value={busquedaExpediente}
+                onChange={(e) => setBusquedaExpediente(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    const q = busquedaExpediente.trim();
+                    navigate(q ? `/expedientes?q=${encodeURIComponent(q)}` : "/expedientes");
+                  }
+                }}
+                placeholder="Buscar expediente..."
+                className="outline-none bg-transparent w-full"
+              />
             </div>
             <Bell size={20} className="text-[#424752]" />
             <HelpCircle size={20} className="text-[#424752]" />
@@ -198,11 +184,6 @@ export default function PanelControl() {
           <div className="bg-white border border-[#c2c6d4] rounded-lg p-6 mb-6">
             <div className="flex items-center justify-between mb-4">
               <div className="font-bold text-xl">Lista de Visitas del Día</div>
-              {puedeCrearVisita && (
-                <button onClick={() => { setVisitaForm({ id_paciente: "", motivo_consulta: "" }); setShowVisitaModal(true); }} className="flex items-center gap-1.5 bg-[#005eb8] text-white rounded px-3.5 py-2 font-semibold text-[13px] hover:bg-[#00478d] transition-colors">
-                  <Plus size={14} /> Nueva Visita
-                </button>
-              )}
             </div>
 
             {loading ? (
@@ -271,46 +252,6 @@ export default function PanelControl() {
           </div>
         </main>
       </div>
-
-      {/* Modal Nueva Visita */}
-      {showVisitaModal && (
-        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 relative">
-            <button onClick={() => setShowVisitaModal(false)} className="absolute top-3 right-3 text-[#424752] hover:bg-[#f2f4f6] p-1.5 rounded-md transition-colors">
-              <X size={20} />
-            </button>
-            <h2 className="font-bold text-xl text-[#00478d] mb-5">Nueva Visita</h2>
-            <form onSubmit={handleCrearVisita} className="space-y-4">
-              <div>
-                <label className="block text-sm font-semibold mb-1">Paciente <span className="text-[#ba1a1a]">*</span></label>
-                <select required value={visitaForm.id_paciente} onChange={e => setVisitaForm({...visitaForm, id_paciente: e.target.value})}
-                  className="w-full border border-[#c2c6d4] rounded-lg px-3 py-2.5 focus:outline-none focus:border-[#005eb8] transition-all">
-                  <option value="">-- Seleccionar paciente --</option>
-                  {pacientes.map(p => (
-                    <option key={p.id_paciente} value={p.id_paciente}>
-                      {p.nombre_completo} {p.dpi ? `(${p.dpi})` : ''} - {p.edad} años
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-semibold mb-1">Motivo de Consulta</label>
-                <textarea value={visitaForm.motivo_consulta} onChange={e => setVisitaForm({...visitaForm, motivo_consulta: e.target.value})} rows={3}
-                  className="w-full border border-[#c2c6d4] rounded-lg px-3 py-2.5 focus:outline-none focus:border-[#005eb8] transition-all"
-                  placeholder="Ej. Control de hipertensión, dolor abdominal, etc." />
-              </div>
-              <div className="flex justify-end gap-3 pt-2">
-                <button type="button" onClick={() => setShowVisitaModal(false)} className="px-5 py-2.5 border border-[#c2c6d4] rounded-lg font-semibold text-[#424752] hover:bg-[#f2f4f6] transition-colors">
-                  Cancelar
-                </button>
-                <button type="submit" disabled={visitaLoading} className="px-5 py-2.5 bg-[#005eb8] hover:bg-[#00478d] text-white rounded-lg font-bold transition-all disabled:opacity-60 flex items-center gap-2">
-                  {visitaLoading ? <><Loader2 size={16} className="animate-spin" /> Creando...</> : "Crear Visita"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

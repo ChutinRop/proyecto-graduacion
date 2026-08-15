@@ -1,25 +1,21 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { LayoutGrid, UserPlus, FolderOpen, Shield, Plus, Search, Bell, HelpCircle, LogOut, Loader2, CheckCircle2, AlertCircle, HeartPulse, Thermometer, Activity, Wind, Droplets, Weight, Ruler, Calculator, Flag, AlertTriangle } from "lucide-react";
+import { LayoutGrid, UserPlus, FolderOpen, Shield, Package, Plus, Search, Bell, HelpCircle, LogOut, Loader2, CheckCircle2, AlertCircle, HeartPulse, Weight, Ruler, Calculator, Flag, AlertTriangle } from "lucide-react";
 import { api } from "../services/api";
-import { filtrarNav } from "../services/permisos";
+import { filtrarNav, roleLabels } from "../services/permisos";
 
 const navItems = [
   { label: "Panel de Control", icon: LayoutGrid, path: "/" },
   { label: "Registro de Pacientes", icon: UserPlus, path: "/registro" },
   { label: "Expedientes Clínicos", icon: FolderOpen, path: "/expedientes" },
+  { label: "Inventario", icon: Package, path: "/inventario" },
   { label: "Control de Acceso", icon: Shield, path: "/admin" },
 ];
 
 const VITAL_RANGES = {
-  presion_sistolica: { min: 90, max: 140, label: "Presión Sistólica", unit: "mmHg", icon: HeartPulse, color: "#e53e3e" },
-  presion_diastolica: { min: 60, max: 90, label: "Presión Diastólica", unit: "mmHg", icon: HeartPulse, color: "#e53e3e" },
-  frecuencia_cardiaca: { min: 60, max: 100, label: "Frecuencia Cardíaca", unit: "lpm", icon: Activity, color: "#dd6b20" },
-  temperatura: { min: 35.5, max: 37.5, label: "Temperatura", unit: "°C", icon: Thermometer, color: "#f6ad55", step: 0.1 },
-  frecuencia_respiratoria: { min: 12, max: 20, label: "Freq. Respiratoria", unit: "rpm", icon: Wind, color: "#38b2ac" },
-  saturacion_oxigeno: { min: 95, max: 100, label: "Saturación O₂", unit: "%", icon: Droplets, color: "#3182ce" },
-  peso: { min: 0, max: 300, label: "Peso", unit: "kg", icon: Weight, color: "#805ad5", step: 0.1 },
-  talla: { min: 0, max: 2.5, label: "Talla", unit: "m", icon: Ruler, color: "#d69e2e", step: 0.01 },
+  presion_arterial: { label: "PRESIÓN ARTERIAL", unit: "mmHg", icon: HeartPulse, color: "#e53e3e", type: "text", placeholder: "120/80" },
+  peso: { label: "PESO", unit: "lb", icon: Weight, color: "#805ad5", step: 0.1, min: 2, max: 660 },
+  talla: { label: "TALLA", unit: "m", icon: Ruler, color: "#d69e2e", step: 0.01, min: 0.3, max: 2.5 },
 };
 
 export default function Preconsulta() {
@@ -69,9 +65,17 @@ export default function Preconsulta() {
         try {
           const pre = await api.getPreconsulta(id_visita);
           setPreconsultaExistente(pre);
-          Object.keys(pre).forEach(k => {
-            if (pre[k] !== null && pre[k] !== undefined) setForm(f => ({ ...f, [k]: pre[k] }));
-          });
+          const formInit = {};
+          if (pre.presion_sistolica || pre.presion_diastolica) {
+            formInit.presion_arterial = [pre.presion_sistolica, pre.presion_diastolica]
+              .filter(v => v !== null && v !== undefined && v !== "")
+              .join("/");
+          }
+          if (pre.peso !== null && pre.peso !== undefined) formInit.peso = pre.peso;
+          if (pre.talla !== null && pre.talla !== undefined) formInit.talla = pre.talla;
+          setForm(formInit);
+          setImc(computeImc(formInit));
+          setAlertas(getAlertas(formInit));
         } catch (e) {}
       }
       if (id_paciente) {
@@ -80,8 +84,6 @@ export default function Preconsulta() {
         const visitaHoy = exp.visitas.find(v => v.id_visita == id_visita) || exp.visitas[0];
         if (visitaHoy) setVisita(visitaHoy);
       }
-      calculateIMC();
-      checkAlertas();
     } catch (err) {
       console.error(err);
     } finally {
@@ -91,33 +93,35 @@ export default function Preconsulta() {
 
   useEffect(() => { fetchData(); }, [id_visita, id_paciente]);
 
-  const calculateIMC = () => {
-    if (form.peso && form.talla && form.talla > 0) {
-      const val = (form.peso / (form.talla * form.talla)).toFixed(2);
-      setImc(val);
-    } else {
-      setImc(null);
-    }
+  const computeImc = (f) => {
+    const p = parseFloat(f.peso);
+    const t = parseFloat(f.talla);
+    return p && t && t > 0 ? ((p * 0.453592) / (t * t)).toFixed(2) : null;
   };
 
-  const checkAlertas = () => {
+  const getAlertas = (f) => {
     const nuevas = [];
-    Object.entries(VITAL_RANGES).forEach(([key, range]) => {
-      const val = parseFloat(form[key]);
-      if (!isNaN(val)) {
-        if (val < range.min || val > range.max) {
-          nuevas.push({ ...range, key, value: val, type: val < range.min ? "bajo" : "alto" });
-        }
+    const pa = (f.presion_arterial || "").trim();
+    if (pa) {
+      const partes = pa.split("/").map(p => parseFloat(p));
+      const sis = partes[0];
+      const dia = partes[1];
+      if (!isNaN(sis) && (sis > 140 || sis < 90)) {
+        nuevas.push({ key: "presion_sistolica", campo: "presion_arterial", label: "Presión sistólica", unit: "mmHg", value: sis, type: sis > 140 ? "alto" : "bajo", min: 90, max: 140 });
       }
-    });
-    setAlertas(nuevas);
+      if (!isNaN(dia) && (dia > 90 || dia < 60)) {
+        nuevas.push({ key: "presion_diastolica", campo: "presion_arterial", label: "Presión diastólica", unit: "mmHg", value: dia, type: dia > 90 ? "alto" : "bajo", min: 60, max: 90 });
+      }
+    }
+    return nuevas;
   };
 
   const handleChange = (e) => {
     const { name, value } = e.target;
-    setForm(f => ({ ...f, [name]: value }));
-    if (name === "peso" || name === "talla") calculateIMC();
-    setTimeout(checkAlertas, 100);
+    const next = { ...form, [name]: value };
+    setForm(next);
+    if (name === "peso" || name === "talla") setImc(computeImc(next));
+    setAlertas(getAlertas(next));
   };
 
   const handleSubmit = async (e) => {
@@ -148,7 +152,7 @@ export default function Preconsulta() {
       await api.registrarPreconsulta(data);
       setFeedback({ type: "ok", msg: "Preconsulta guardada. Estado: EN TRIAJE" });
       setPreconsultaExistente(data);
-      if (!id_visita) navigate(`/preconsulta?id_visita=${visitaId}`, { replace: true });
+      setTimeout(() => navigate(-1), 900);
     } catch (err) {
       setFeedback({ type: "err", msg: err.message });
     } finally {
@@ -163,43 +167,13 @@ export default function Preconsulta() {
   if (loading) return <div className="flex h-screen items-center justify-center"><Loader2 size={32} className="animate-spin text-[#005eb8]" /></div>;
   if (!paciente && !visita) return <div className="flex h-screen items-center justify-center text-[#ba1a1a]">Visita o paciente no especificado</div>;
 
-  const VitalInput = ({ key, range }) => {
-    const val = form[key];
-    const alerta = alertas.find(a => a.key === key);
-    const isOut = !!alerta;
-    return (
-      <div className={`relative ${isOut ? "ring-2 ring-[#ba1a1a]" : ""}`}>
-        <label className="block text-sm font-semibold mb-1 flex items-center gap-1.5">
-          <range.icon size={14} className={isOut ? "text-[#ba1a1a]" : "text-[#005eb8]"} />
-          {range.label}
-          {isOut && <Flag size={12} className="text-[#ba1a1a]" title={alerta.type === "bajo" ? `Bajo (mín: ${range.min})` : `Alto (máx: ${range.max})`} />}
-        </label>
-        <input
-          name={key}
-          type="number"
-          step={range.step || 1}
-          value={val || ""}
-          onChange={handleChange}
-          placeholder={range.min > 0 ? `${range.min}-${range.max}` : ""}
-          className={`w-full border rounded-lg px-3 py-2.5 focus:outline-none focus:border-[#005eb8] focus:ring-2 focus:ring-[#005eb8]/20 transition-all ${isOut ? "border-[#ba1a1a] bg-[#fff5f5]" : "border-[#c2c6d4]"}`}
-        />
-        <span className="absolute right-3 top-8 text-xs text-[#424752]">{range.unit}</span>
-      </div>
-    );
-  };
-
   return (
     <div className="flex h-screen bg-[#f7f9fb] font-sans text-[#191c1e] overflow-hidden">
       <aside className="w-[255px] h-full flex-shrink-0 bg-white border-r border-[#c2c6d4] flex flex-col justify-between">
         <div className="p-4 overflow-y-auto">
-          <div className="flex items-center gap-3 pb-6">
-            <div className="w-9 h-9 rounded-md bg-[#006a71] text-white flex items-center justify-center">
-              <HeartPulse size={20} />
-            </div>
-            <div>
-              <div className="font-bold text-[16px] text-[#00478d]">CMP Zaculeu</div>
-              <div className="text-xs text-[#424752]">Preconsulta / Triaje</div>
-            </div>
+          <div className="pb-6">
+            <div className="font-bold text-lg text-[#00478d]">CMP Zaculeu</div>
+            <div className="text-xs text-[#424752] mt-0.5 capitalize">{roleLabels[user.rol] || user.rol}</div>
           </div>
           <nav className="flex flex-col gap-1">
             {nav.map(({ label, icon: Icon, path }) => (
@@ -273,7 +247,14 @@ export default function Preconsulta() {
           <form onSubmit={handleSubmit} className="bg-white border border-[#c2c6d4] rounded-xl p-6 shadow-sm space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
               {Object.entries(VITAL_RANGES).map(([key, range]) => (
-                <VitalInput key={key} range={range} />
+                <VitalInput
+                  key={key}
+                  name={key}
+                  range={range}
+                  value={form[key]}
+                  isOut={alertas.some(a => a.key === key || a.campo === key)}
+                  onChange={handleChange}
+                />
               ))}
             </div>
 
@@ -311,6 +292,28 @@ export default function Preconsulta() {
           </form>
         </main>
       </div>
+    </div>
+  );
+}
+
+function VitalInput({ name, range, value, isOut, onChange }) {
+  return (
+    <div className={`relative ${isOut ? "ring-2 ring-[#ba1a1a]" : ""}`}>
+      <label className="block text-sm font-semibold mb-1 flex items-center gap-1.5">
+        <range.icon size={14} className={isOut ? "text-[#ba1a1a]" : "text-[#005eb8]"} />
+        {range.label}
+        {isOut && <Flag size={12} className="text-[#ba1a1a]" title="Fuera de rango" />}
+      </label>
+      <input
+        name={name}
+        type={range.type || "number"}
+        step={range.step || 1}
+        value={value || ""}
+        onChange={onChange}
+        placeholder={range.placeholder || (range.min > 0 ? `${range.min}-${range.max}` : "")}
+        className={`w-full border rounded-lg px-3 py-2.5 focus:outline-none focus:border-[#005eb8] focus:ring-2 focus:ring-[#005eb8]/20 transition-all ${isOut ? "border-[#ba1a1a] bg-[#fff5f5]" : "border-[#c2c6d4]"}`}
+      />
+      <span className="absolute right-3 top-8 text-xs text-[#424752]">{range.unit}</span>
     </div>
   );
 }

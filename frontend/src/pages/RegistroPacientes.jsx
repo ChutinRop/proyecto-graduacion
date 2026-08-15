@@ -1,13 +1,14 @@
 import React, { useState } from "react";
-import { LayoutGrid, UserPlus, FolderOpen, Shield, Plus, Search, Bell, HelpCircle, LogOut, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
+import { LayoutGrid, UserPlus, FolderOpen, Shield, Package, Bell, HelpCircle, LogOut, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../services/api";
-import { filtrarNav } from "../services/permisos";
+import { filtrarNav, roleLabels } from "../services/permisos";
 
 const navItems = [
   { label: "Panel de Control", icon: LayoutGrid, path: "/" },
   { label: "Registro de Pacientes", icon: UserPlus, path: "/registro" },
   { label: "Expedientes Clínicos", icon: FolderOpen, path: "/expedientes" },
+  { label: "Inventario", icon: Package, path: "/inventario" },
   { label: "Control de Acceso", icon: Shield, path: "/admin" },
 ];
 
@@ -55,12 +56,9 @@ export default function RegistroPacientes() {
     <div className="flex h-screen bg-[#f7f9fb] font-sans text-[#191c1e] overflow-hidden">
       <aside className="w-[255px] h-full flex-shrink-0 bg-white border-r border-[#c2c6d4] flex flex-col justify-between">
         <div className="p-4 overflow-y-auto">
-          <div className="flex items-center gap-3 pb-6">
-            <div className="w-9 h-9 rounded-md bg-[#005eb8] text-white flex items-center justify-center font-bold">+</div>
-            <div>
-              <div className="font-bold text-[16px] text-[#00478d]">CMP Zaculeu</div>
-              <div className="text-xs text-[#424752]">Personal Médico</div>
-            </div>
+          <div className="pb-6">
+            <div className="font-bold text-lg text-[#00478d]">CMP Zaculeu</div>
+            <div className="text-xs text-[#424752] mt-0.5 capitalize">{roleLabels[user.rol] || user.rol}</div>
           </div>
           <nav className="flex flex-col gap-1">
             {nav.map(({ label, icon: Icon, path }) => (
@@ -73,9 +71,6 @@ export default function RegistroPacientes() {
           </nav>
         </div>
         <div className="p-4 border-t border-[#c2c6d4] flex flex-col gap-3 shrink-0">
-          <button onClick={() => navigate("/registro")} className="w-full min-h-[48px] bg-[#005eb8] text-white rounded font-semibold text-sm flex items-center justify-center gap-2 hover:bg-[#00478d] transition-colors">
-            <Plus size={18} /> Nueva Consulta
-          </button>
           <div onClick={handleLogout} className="flex items-center gap-2 px-3 py-2 text-sm text-[#424752] hover:bg-[#f2f4f6] rounded-md cursor-pointer transition-colors">
             <LogOut size={16} /> Cerrar Sesión
           </div>
@@ -86,9 +81,6 @@ export default function RegistroPacientes() {
         <header className="h-[73px] shrink-0 bg-white border-b border-[#c2c6d4] flex items-center justify-between px-8 sticky top-0 z-10">
           <div className="font-bold text-xl text-[#00478d]">Centro Médico Público de Zaculeu</div>
           <div className="flex items-center gap-5">
-            <div className="flex items-center gap-2 w-[260px] bg-[#f2f4f6] border border-[#c2c6d4] rounded px-3.5 py-2 text-sm text-[#424752]">
-              <Search size={16} /> Buscar paciente...
-            </div>
             <Bell size={20} className="text-[#424752]" />
             <HelpCircle size={20} className="text-[#424752]" />
             <div className="w-9 h-9 rounded-full bg-[#d0e1fb] border border-[#c2c6d4] flex items-center justify-center font-bold text-[#00478d] text-sm">
